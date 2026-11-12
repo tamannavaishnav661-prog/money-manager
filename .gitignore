@@ -1,0 +1,16 @@
+# Secrets & environment variables (NEVER upload to GitHub)
+.env
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Local database
+*.db
+*.sqlite
+*.sqlite3
+
+# OS files
+.DS_Store
+Thumbs.db

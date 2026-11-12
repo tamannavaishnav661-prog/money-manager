@@ -1,0 +1,74 @@
+/* ==========================================================================
+   MoneyManager Pro - Main Stylesheet
+   Complements Tailwind CSS with custom variables, scrollbars & transitions
+   ========================================================================== */
+
+:root {
+  --brand-primary: #2563eb;
+  --brand-primary-dark: #1d4ed8;
+  --surface-bg: #f8fafc;
+  --surface-card: #ffffff;
+  --text-main: #1e293b;
+  --text-muted: #64748b;
+  --border-subtle: #e2e8f0;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--surface-bg);
+  color: var(--text-main);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Smooth module & modal transitions */
+section:not(.hidden),
+#recoveryModal:not(.hidden) {
+  animation: fadeSlideIn 0.2s ease-out;
+}
+
+@keyframes fadeSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Clean custom scrollbar for wide transaction tables */
+.overflow-x-auto::-webkit-scrollbar {
+  height: 6px;
+}
+
+.overflow-x-auto::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 9999px;
+}
+
+.overflow-x-auto::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+
+.overflow-x-auto::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Print-friendly styles for reports */
+@media print {
+  header,
+  footer,
+  #txForm,
+  button {
+    display: none !important;
+  }
+
+  body {
+    background: #ffffff;
+  }
+}
