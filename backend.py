@@ -170,7 +170,54 @@ def normalize_mobile(raw_mobile):
 
 
 def send_gmail_message(to_email, subject, body_text):
-    """Sends a plain-text email via Gmail SMTP_SSL if credentials are configured."""
+    """Sends a plain-text email via HTTPS Webhook (Render-safe), Brevo API, or Gmail SMTP."""
+    webhook_url = os.environ.get("EMAIL_WEBHOOK_URL", "").strip()
+    if webhook_url:
+        payload = json.dumps({
+            "to": to_email,
+            "subject": subject,
+            "body": body_text,
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            webhook_url,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                if 200 <= resp.status < 400:
+                    return True, "email_webhook"
+                return False, f"Email webhook status {resp.status}"
+        except urllib.error.URLError as err:
+            return False, f"Email webhook error: {err}"
+
+    brevo_key = os.environ.get("BREVO_API_KEY", "").strip()
+    sender_email = os.environ.get("BREVO_SENDER_EMAIL", "").strip() or os.environ.get("GMAIL_USER", "").strip()
+    if brevo_key and sender_email:
+        payload = json.dumps({
+            "sender": {"name": "MoneyManager Pro", "email": sender_email},
+            "to": [{"email": to_email}],
+            "subject": subject,
+            "textContent": body_text,
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            "https://api.brevo.com/v3/smtp/email",
+            data=payload,
+            headers={
+                "api-key": brevo_key,
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                if 200 <= resp.status < 300:
+                    return True, "brevo"
+                return False, f"Brevo status {resp.status}"
+        except urllib.error.URLError as err:
+            return False, f"Brevo error: {err}"
+
     gmail_user = os.environ.get("GMAIL_USER", "").strip()
     gmail_pass = os.environ.get("GMAIL_APP_PASSWORD", "").strip()
     if not gmail_user or not gmail_pass:
@@ -356,12 +403,14 @@ def register():
     VALUES (?, ?, 0.0, 0.0, 0.0, 0.0, 0)
     """, (new_user_id, today_str))
 
-    conn.commit()
-    conn.close()
-
     sent_ok, channels = dispatch_otp_notifications(email, formatted_mobile, new_otp)
     if not sent_ok:
+        conn.rollback()
+        conn.close()
         return jsonify({"success": False, "message": f"Could not send OTP: {channels}"}), 502
+
+    conn.commit()
+    conn.close()
 
     return jsonify({
         "success": True,
