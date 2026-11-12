@@ -538,7 +538,25 @@ def get_daybook():
     """, (user_id, req_date)).fetchall()
 
     deleted_count = conn.execute("SELECT COUNT(*) FROM transactions WHERE user_id = ? AND is_deleted = 1", (user_id,)).fetchone()[0]
+
+    # Compute actual yesterday summary (empty/false on a user's first day)
+    try:
+        req_dt = datetime.fromisoformat(req_date).date()
+    except ValueError:
+        req_dt = date.today()
+    yesterday_str = (req_dt - timedelta(days=1)).isoformat()
+
+    y_bal = conn.execute("SELECT * FROM daily_balances WHERE user_id = ? AND date = ?", (user_id, yesterday_str)).fetchone()
+    y_txs = conn.execute("""
+        SELECT type, amount FROM transactions
+        WHERE user_id = ? AND date = ? AND is_deleted = 0
+    """, (user_id, yesterday_str)).fetchall()
     conn.close()
+
+    y_opening = (y_bal["opening_cash"] + y_bal["opening_online"]) if y_bal else 0.0
+    y_deposits = sum(float(t["amount"] or 0) for t in y_txs if t["type"] == "Deposit")
+    y_withdrawals = sum(float(t["amount"] or 0) for t in y_txs if t["type"] != "Deposit")
+    y_has_data = bool(y_bal or y_txs)
 
     return jsonify({
         "success": True,
@@ -547,7 +565,15 @@ def get_daybook():
         "opening_cash": day_bal["opening_cash"] if day_bal else 0.0,
         "opening_online": day_bal["opening_online"] if day_bal else 0.0,
         "transactions": [dict(t) for t in txs],
-        "deleted_count": deleted_count
+        "deleted_count": deleted_count,
+        "yesterday_summary": {
+            "has_data": y_has_data,
+            "date": yesterday_str,
+            "opening": y_opening,
+            "deposits": y_deposits,
+            "withdrawals": y_withdrawals,
+            "net_change": y_deposits - y_withdrawals,
+        },
     })
 
 

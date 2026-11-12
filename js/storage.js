@@ -34,8 +34,11 @@ async function apiLoginStep2(email, otp) {
   });
 }
 
-async function apiFetchDaybook(userId) {
-  return apiRequest(`/api/daybook?user_id=${userId}`);
+async function apiFetchDaybook(userId, dateStr = "") {
+  const query = dateStr
+    ? `user_id=${userId}&date=${encodeURIComponent(dateStr)}`
+    : `user_id=${userId}`;
+  return apiRequest(`/api/daybook?${query}`);
 }
 
 async function apiAddTransaction(tx) {
@@ -65,11 +68,12 @@ async function apiSendEmailBackup(userId, email) {
   });
 }
 
-async function apiUpdateOpeningBalance(userId, openingCash, openingOnline) {
+async function apiUpdateOpeningBalance(userId, openingCash, openingOnline, dateStr = "") {
   return apiRequest("/api/opening-balance", {
     method: "POST",
     body: JSON.stringify({
       user_id: userId,
+      date: dateStr || getLocalDateKey(),
       opening_cash: openingCash,
       opening_online: openingOnline,
     }),

@@ -8,6 +8,22 @@ const BACKEND_URL =
     ? "http://127.0.0.1:5000"
     : window.location.origin;
 
+function getLocalDateKey(d = new Date()) {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function formatDisplayDate(d = new Date()) {
+  return d.toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
 let currentUser = null;
 let authMode = "signin"; // 'signin' or 'signup'
 let activeModule = 3;
@@ -15,13 +31,23 @@ let activeModule = 3;
 let deletedArchiveVault = [];
 
 let daybookData = {
-  date: "Wednesday, Nov 11, 2026",
+  date: formatDisplayDate(),
   opening: { cash: 0.0, online: 0.0, total: 0.0 },
   transactions: [],
 };
 
+let yesterdaySummary = {
+  hasData: false,
+  opening: 0.0,
+  deposits: 0.0,
+  withdrawals: 0.0,
+  netChange: 0.0,
+};
+
+let reportViewData = null;
+
 const mockMonthLedger = [];
-let selectedReportDateKey = "2026-11-11";
+let selectedReportDateKey = getLocalDateKey();
 
 /**
  * Formats a numeric value as Indian Rupees (INR).

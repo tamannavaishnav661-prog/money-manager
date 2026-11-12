@@ -42,9 +42,9 @@
                 <div>
                     <span class="text-xl font-bold tracking-tight text-slate-900">MoneyManager <span
                             class="text-blue-600">Pro</span></span>
-                    <span class="text-xs block text-emerald-600 font-medium flex items-center gap-1">
-                        <i class="fa-solid fa-lock text-[9px]"></i> Private Encrypted Ledger (<span id="headerUserEmail"
-                            class="font-semibold">user</span>)
+                    <span class="text-xs text-emerald-600 font-medium flex items-center gap-1 whitespace-nowrap">
+                        <i class="fa-solid fa-lock text-[9px]"></i> Private Ledger (<span id="headerUserEmail"
+                            class="font-semibold max-w-[180px] truncate inline-block align-bottom">user</span>)
                     </span>
                 </div>
             </div>
@@ -53,15 +53,15 @@
             <nav class="flex items-center space-x-1 sm:space-x-2">
                 <button onclick="switchModule(2)" id="navMod2"
                     class="px-3 py-2 rounded-lg text-sm font-medium transition text-slate-600 hover:bg-slate-100 flex items-center gap-1.5">
-                    <i class="fa-solid fa-chart-line text-xs"></i> <span>Module 2: Dashboard</span>
+                    <i class="fa-solid fa-chart-line text-xs"></i> <span>Dashboard</span>
                 </button>
                 <button onclick="switchModule(3)" id="navMod3"
                     class="px-3 py-2 rounded-lg text-sm font-medium transition bg-blue-600 text-white flex items-center gap-1.5 shadow-sm">
-                    <i class="fa-solid fa-book text-xs"></i> <span>Module 3: Daily Records</span>
+                    <i class="fa-solid fa-book text-xs"></i> <span>Daily Records</span>
                 </button>
                 <button onclick="switchModule(4)" id="navMod4"
                     class="px-3 py-2 rounded-lg text-sm font-medium transition text-slate-600 hover:bg-slate-100 flex items-center gap-1.5">
-                    <i class="fa-solid fa-file-invoice-dollar text-xs"></i> <span>Module 4: Reports</span>
+                    <i class="fa-solid fa-file-invoice-dollar text-xs"></i> <span>Reports</span>
                 </button>
             </nav>
 
@@ -193,13 +193,13 @@
             <div
                 class="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
-                    <h2 class="text-xl font-bold text-slate-900">Module 2: Liquid Balances & Services Overview</h2>
+                    <h2 class="text-xl font-bold text-slate-900">Liquid Balances & Services Overview</h2>
                     <p class="text-sm text-slate-500">Real-time liquid cash, online ledger, and transactional service
                         distribution</p>
                 </div>
                 <div class="bg-slate-50 border border-slate-200 px-4 py-2 rounded-xl text-right">
                     <span class="text-xs uppercase text-slate-400 font-semibold block">Live Business Date</span>
-                    <span id="dashLiveDate" class="font-bold text-slate-800 text-sm">Wednesday, Nov 11, 2026</span>
+                    <span id="dashLiveDate" class="font-bold text-slate-800 text-sm">Today</span>
                 </div>
             </div>
 
@@ -263,25 +263,24 @@
                         <i class="fa-solid fa-calendar-check text-blue-600"></i>
                         <h3 class="font-bold text-slate-800">Last Day Transaction Details (Yesterday)</h3>
                     </div>
-                    <span class="text-xs bg-slate-100 text-slate-600 font-medium px-2.5 py-1 rounded-full">Carried
-                        Over</span>
+                    <span id="yestBadge" class="text-xs bg-slate-100 text-slate-600 font-medium px-2.5 py-1 rounded-full">First Day</span>
                 </div>
                 <div class="grid grid-cols-1 sm:grid-cols-4 gap-4">
                     <div class="p-4 rounded-xl bg-slate-50 border border-slate-100">
                         <span class="text-xs text-slate-500 font-medium block">Opening Carried</span>
-                        <span class="text-lg font-bold text-slate-800">₹17,400.00</span>
+                        <span id="yestOpening" class="text-lg font-bold text-slate-800">₹0.00</span>
                     </div>
                     <div class="p-4 rounded-xl bg-emerald-50 border border-emerald-100">
                         <span class="text-xs text-emerald-600 font-medium block">Total In (Deposits)</span>
-                        <span class="text-lg font-bold text-emerald-700">+₹20,000.00</span>
+                        <span id="yestDeposits" class="text-lg font-bold text-emerald-700">+₹0.00</span>
                     </div>
                     <div class="p-4 rounded-xl bg-rose-50 border border-rose-100">
                         <span class="text-xs text-rose-600 font-medium block">Total Out (Withdrawals)</span>
-                        <span class="text-lg font-bold text-rose-700">-₹10,000.00</span>
+                        <span id="yestWithdrawals" class="text-lg font-bold text-rose-700">-₹0.00</span>
                     </div>
                     <div class="p-4 rounded-xl bg-blue-50 border border-blue-100">
                         <span class="text-xs text-blue-600 font-medium block">Day Net Change</span>
-                        <span class="text-lg font-bold text-blue-800">+₹10,000.00 ▲</span>
+                        <span id="yestNetChange" class="text-lg font-bold text-blue-800">₹0.00</span>
                     </div>
                 </div>
             </div>
@@ -556,7 +555,7 @@
             <div
                 class="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                    <h2 class="text-xl font-bold text-slate-900">Module 4: Day & Month Reports</h2>
+                    <h2 class="text-xl font-bold text-slate-900">Day & Month Reports</h2>
                     <p class="text-sm text-slate-500">Inspect full itemized daily registers for any date of the month
                     </p>
                 </div>
@@ -580,26 +579,15 @@
                             class="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
                             <i class="fa-solid fa-calendar text-blue-600"></i> Select Date:
                         </span>
-                        <input type="date" id="repDateInput" value="2026-11-11"
+                        <input type="date" id="repDateInput"
                             onchange="onReportDateSelect(this.value)"
                             class="text-xs font-bold font-mono border border-slate-300 rounded-lg p-2 focus:ring-2 focus:ring-blue-500 bg-white">
 
                         <div class="flex flex-wrap items-center gap-1.5">
-                            <button onclick="onReportDateSelect('2026-11-11')"
-                                class="text-[11px] font-semibold bg-blue-50 text-blue-700 hover:bg-blue-100 px-2.5 py-1 rounded-md transition">Today
-                                (11 Nov)</button>
-                            <button onclick="onReportDateSelect('2026-11-10')"
-                                class="text-[11px] font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200 px-2.5 py-1 rounded-md transition">10
-                                Nov</button>
-                            <button onclick="onReportDateSelect('2026-11-03')"
-                                class="text-[11px] font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200 px-2.5 py-1 rounded-md transition">03
-                                Nov</button>
-                            <button onclick="onReportDateSelect('2026-11-02')"
-                                class="text-[11px] font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200 px-2.5 py-1 rounded-md transition">02
-                                Nov</button>
-                            <button onclick="onReportDateSelect('2026-11-01')"
-                                class="text-[11px] font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200 px-2.5 py-1 rounded-md transition">01
-                                Nov</button>
+                            <button onclick="selectQuickReportDate(0)"
+                                class="text-[11px] font-semibold bg-blue-50 text-blue-700 hover:bg-blue-100 px-2.5 py-1 rounded-md transition">Today</button>
+                            <button onclick="selectQuickReportDate(-1)"
+                                class="text-[11px] font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200 px-2.5 py-1 rounded-md transition">Yesterday</button>
                         </div>
                     </div>
 
@@ -619,15 +607,15 @@
                     <div class="p-5 rounded-2xl bg-white border border-slate-200 shadow-sm">
                         <span class="text-xs uppercase tracking-wider text-slate-500 font-bold block">1. Starting
                             Balance</span>
-                        <div id="repStarting" class="text-2xl font-black text-slate-900 mt-2 font-mono">₹17,400.00</div>
-                        <span id="repStartingSplit" class="text-[11px] text-slate-400 mt-1 block">Cash: ₹5,400.00 |
-                            Online: ₹12,000.00</span>
+                        <div id="repStarting" class="text-2xl font-black text-slate-900 mt-2 font-mono">₹0.00</div>
+                        <span id="repStartingSplit" class="text-[11px] text-slate-400 mt-1 block">Cash: ₹0.00 |
+                            Online: ₹0.00</span>
                     </div>
 
                     <div class="p-5 rounded-2xl bg-emerald-50/70 border border-emerald-200 shadow-sm">
                         <span class="text-xs uppercase tracking-wider text-emerald-700 font-bold block">2. Total
                             Deposits (Increased)</span>
-                        <div id="repDeposits" class="text-2xl font-black text-emerald-700 mt-2 font-mono">+₹20,000.00
+                        <div id="repDeposits" class="text-2xl font-black text-emerald-700 mt-2 font-mono">+₹0.00
                         </div>
                         <span id="repDepositsSplit" class="text-[11px] text-emerald-600/80 mt-1 block">Inflows
                             recorded</span>
@@ -636,7 +624,7 @@
                     <div class="p-5 rounded-2xl bg-rose-50/70 border border-rose-200 shadow-sm">
                         <span class="text-xs uppercase tracking-wider text-rose-700 font-bold block">3. Total
                             Withdrawals (Decreased)</span>
-                        <div id="repWithdrawals" class="text-2xl font-black text-rose-700 mt-2 font-mono">-₹50,000.00
+                        <div id="repWithdrawals" class="text-2xl font-black text-rose-700 mt-2 font-mono">-₹0.00
                         </div>
                         <span id="repWithdrawalsSplit" class="text-[11px] text-rose-600/80 mt-1 block">Outflows
                             recorded</span>
@@ -645,7 +633,7 @@
                     <div class="p-5 rounded-2xl bg-blue-50/70 border border-blue-200 shadow-sm">
                         <span class="text-xs uppercase tracking-wider text-blue-700 font-bold block">4. End of Day
                             Balance</span>
-                        <div id="repEnding" class="text-2xl font-black text-blue-800 mt-2 font-mono">₹27,400.00</div>
+                        <div id="repEnding" class="text-2xl font-black text-blue-800 mt-2 font-mono">₹0.00</div>
                         <span id="repEndingNetBadge" class="text-[11px] text-blue-600/80 mt-1 block font-semibold">▲
                             Overall Day Increased</span>
                     </div>
@@ -655,7 +643,7 @@
                     <div class="p-4 border-b border-slate-100 flex items-center justify-between">
                         <div>
                             <h3 class="font-bold text-slate-800 text-sm">Whole Day Transaction Record — <span
-                                    id="repTableDateTitle" class="text-blue-600">Wednesday, Nov 11, 2026</span></h3>
+                                    id="repTableDateTitle" class="text-blue-600">Today</span></h3>
                             <p class="text-xs text-slate-400">Complete itemized register with categories, amounts,
                                 effects and running totals</p>
                         </div>

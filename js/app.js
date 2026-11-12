@@ -246,7 +246,7 @@ async function saveOpeningBalance(e) {
   }
 
   try {
-    await apiUpdateOpeningBalance(uid, cash, online);
+    await apiUpdateOpeningBalance(uid, cash, online, getLocalDateKey());
   } catch (err) {
     // Offline fallback still updates local UI state
   }
@@ -263,10 +263,27 @@ async function saveOpeningBalance(e) {
   renderReportsForDate(selectedReportDateKey);
 }
 
+function mapServerTransactions(txList) {
+  return (txList || []).map((t) => ({
+    id: t.id,
+    time: t.time || "10:00 AM",
+    category:
+      t.type === "Withdrawal" ? "Withdrawal (Portal)" : "Deposit (Portal)",
+    description: t.description || "Transaction",
+    mode: t.mode || "Cash",
+    effect: t.type || "Deposit",
+    amount: Number(t.amount || 0),
+  }));
+}
+
 async function loadDaybookFromServer() {
   const uid = (currentUser && currentUser.id) || 1;
+  const todayKey = getLocalDateKey();
+  daybookData.date = formatDisplayDate();
+  selectedReportDateKey = todayKey;
+
   try {
-    const data = await apiFetchDaybook(uid);
+    const data = await apiFetchDaybook(uid, todayKey);
     if (data && data.success) {
       const cash = Number(data.opening_cash ?? 0);
       const online = Number(data.opening_online ?? 0);
@@ -278,19 +295,20 @@ async function loadDaybookFromServer() {
       updateOpeningBalanceDisplay();
 
       if (data.transactions) {
-        daybookData.transactions = data.transactions.map((t) => ({
-          id: t.id,
-          time: t.time || "10:00 AM",
-          category:
-            t.type === "Withdrawal"
-              ? "Withdrawal (Portal)"
-              : "Deposit (Portal)",
-          description: t.description || "Transaction",
-          mode: t.mode || "Cash",
-          effect: t.type || "Deposit",
-          amount: Number(t.amount || 0),
-        }));
+        daybookData.transactions = mapServerTransactions(data.transactions);
       }
+
+      if (data.yesterday_summary) {
+        const y = data.yesterday_summary;
+        yesterdaySummary = {
+          hasData: Boolean(y.has_data),
+          opening: Number(y.opening ?? 0),
+          deposits: Number(y.deposits ?? 0),
+          withdrawals: Number(y.withdrawals ?? 0),
+          netChange: Number(y.net_change ?? 0),
+        };
+      }
+
       updateRecoveryBadge(data.deleted_count || deletedArchiveVault.length);
     }
   } catch (e) {
@@ -323,6 +341,7 @@ async function addTransaction(e) {
   const newTx = {
     id: Date.now(),
     user_id: uid,
+    date: getLocalDateKey(),
     time: timeStr,
     category: cat,
     description: desc,
@@ -546,6 +565,11 @@ function renderDaybookTable() {
 function renderDashboard() {
   const calcs = calculateDatasetBalances(daybookData);
 
+  const liveDateEl = document.getElementById("dashLiveDate");
+  if (liveDateEl) {
+    liveDateEl.textContent = formatDisplayDate();
+  }
+
   document.getElementById("dashCashBalance").textContent = formatINR(
     calcs.cashBalance
   );
@@ -555,6 +579,30 @@ function renderDashboard() {
   document.getElementById("dashTotalBalance").textContent = formatINR(
     calcs.running
   );
+
+  // Render real Yesterday Summary (or First Day empty state)
+  const yestBadge = document.getElementById("yestBadge");
+  const yestOpening = document.getElementById("yestOpening");
+  const yestDeposits = document.getElementById("yestDeposits");
+  const yestWithdrawals = document.getElementById("yestWithdrawals");
+  const yestNetChange = document.getElementById("yestNetChange");
+
+  if (yestBadge && yestOpening && yestDeposits && yestWithdrawals && yestNetChange) {
+    yestBadge.textContent = yesterdaySummary.hasData
+      ? "Carried Over"
+      : "First Day / No Prior Records";
+    yestOpening.textContent = formatINR(yesterdaySummary.opening);
+    yestDeposits.textContent = "+" + formatINR(yesterdaySummary.deposits);
+    yestWithdrawals.textContent = "-" + formatINR(yesterdaySummary.withdrawals);
+
+    if (!yesterdaySummary.hasData) {
+      yestNetChange.textContent = "₹0.00";
+    } else if (yesterdaySummary.netChange >= 0) {
+      yestNetChange.textContent = `+${formatINR(yesterdaySummary.netChange)} ▲`;
+    } else {
+      yestNetChange.textContent = `-${formatINR(Math.abs(yesterdaySummary.netChange))} ▼`;
+    }
+  }
 
   const categories = [
     "Deposit (Portal)",
@@ -592,27 +640,69 @@ function renderDashboard() {
   });
 }
 
-function onReportDateSelect(dateKey) {
+function selectQuickReportDate(offsetDays) {
+  const d = new Date();
+  d.setDate(d.getDate() + offsetDays);
+  onReportDateSelect(getLocalDateKey(d));
+}
+
+async function onReportDateSelect(dateKey) {
   selectedReportDateKey = dateKey;
-  document.getElementById("repDateInput").value = dateKey;
+  const repInput = document.getElementById("repDateInput");
+  if (repInput) repInput.value = dateKey;
+
+  const todayKey = getLocalDateKey();
+  if (dateKey === todayKey) {
+    reportViewData = null;
+    renderReportsForDate(dateKey);
+    return;
+  }
+
+  const uid = (currentUser && currentUser.id) || 1;
+  try {
+    const data = await apiFetchDaybook(uid, dateKey);
+    if (data && data.success) {
+      const cash = Number(data.opening_cash ?? 0);
+      const online = Number(data.opening_online ?? 0);
+      reportViewData = {
+        date: dateKey,
+        opening: { cash, online, total: cash + online },
+        transactions: mapServerTransactions(data.transactions),
+      };
+    }
+  } catch (err) {
+    reportViewData = {
+      date: dateKey,
+      opening: { cash: 0, online: 0, total: 0 },
+      transactions: [],
+    };
+  }
   renderReportsForDate(dateKey);
 }
 
 function renderReportsForDate(dateKey) {
-  const calcs = calculateDatasetBalances(daybookData);
+  const repInput = document.getElementById("repDateInput");
+  if (repInput && repInput.value !== dateKey) {
+    repInput.value = dateKey;
+  }
+  const activeDataset =
+    dateKey === getLocalDateKey() || !reportViewData
+      ? daybookData
+      : reportViewData;
+  const calcs = calculateDatasetBalances(activeDataset);
   const displayTitle = `Date: ${dateKey}`;
 
   document.getElementById("repTableDateTitle").textContent = displayTitle;
   document.getElementById("repSummaryDate").textContent = dateKey;
 
   document.getElementById("repStarting").textContent = formatINR(
-    daybookData.opening.total
+    activeDataset.opening.total
   );
   document.getElementById(
     "repStartingSplit"
   ).textContent = `Cash: ${formatINR(
-    daybookData.opening.cash
-  )} | Online: ${formatINR(daybookData.opening.online)}`;
+    activeDataset.opening.cash
+  )} | Online: ${formatINR(activeDataset.opening.online)}`;
   document.getElementById("repDeposits").textContent =
     "+" + formatINR(calcs.totalDeposits);
   document.getElementById("repWithdrawals").textContent =
@@ -752,6 +842,8 @@ function viewDateFromLedger(dateKey) {
 
 window.addEventListener("DOMContentLoaded", () => {
   initOtpInputs();
+  const repInput = document.getElementById("repDateInput");
+  if (repInput) repInput.value = selectedReportDateKey;
   renderDaybookTable();
   renderDashboard();
 });
