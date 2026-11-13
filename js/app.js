@@ -273,6 +273,7 @@ function mapServerTransactions(txList) {
     mode: t.mode || "Cash",
     effect: t.type || "Deposit",
     amount: Number(t.amount || 0),
+    denominations: t.denominations || null,
   }));
 }
 
@@ -296,6 +297,10 @@ async function loadDaybookFromServer() {
 
       if (data.transactions) {
         daybookData.transactions = mapServerTransactions(data.transactions);
+      }
+
+      if (data.cash_denominations_flow) {
+        cashDenominationsFlow = data.cash_denominations_flow;
       }
 
       if (data.yesterday_summary) {
@@ -338,6 +343,11 @@ async function addTransaction(e) {
     minute: "2-digit",
   });
 
+  const denoms =
+    mode === "Cash" && hasActiveDenominations(txDenominations)
+      ? { ...txDenominations }
+      : null;
+
   const newTx = {
     id: Date.now(),
     user_id: uid,
@@ -349,6 +359,7 @@ async function addTransaction(e) {
     type: effect,
     effect: effect,
     amount: amt,
+    denominations: denoms,
   };
 
   try {
@@ -360,6 +371,7 @@ async function addTransaction(e) {
   daybookData.transactions.push(newTx);
   document.getElementById("txDesc").value = "";
   document.getElementById("txAmount").value = "";
+  clearTxDenominations();
 
   renderDaybookTable();
   renderDashboard();
@@ -457,6 +469,307 @@ async function triggerEmailBackup() {
   closeRecoveryModal();
 }
 
+// --- CURRENCY DENOMINATIONS & NOTE COUNTER CONTROLLERS ---
+
+function getDenominationBadgeStyle(denom) {
+  switch (Number(denom)) {
+    case 500:
+      return "bg-stone-100 text-stone-800 border-stone-300";
+    case 200:
+      return "bg-amber-100 text-amber-900 border-amber-300";
+    case 100:
+      return "bg-indigo-100 text-indigo-900 border-indigo-300";
+    case 50:
+      return "bg-cyan-100 text-cyan-900 border-cyan-300";
+    case 20:
+      return "bg-emerald-100 text-emerald-900 border-emerald-300";
+    case 10:
+      return "bg-orange-100 text-orange-950 border-orange-300";
+    default:
+      return "bg-slate-100 text-slate-800 border-slate-300";
+  }
+}
+
+function renderDenominationPillsHtml(denomMap) {
+  if (!denomMap) return "";
+  const pills = [];
+  CURRENCY_DENOMINATIONS.forEach((d) => {
+    const count = parseInt(denomMap[d] || 0, 10);
+    if (count > 0) {
+      const style = getDenominationBadgeStyle(d);
+      pills.push(
+        `<span class="inline-flex items-center text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded border ${style}">₹${d}×${count}</span>`
+      );
+    }
+  });
+  return pills.join(" ");
+}
+
+function onTxModeChange() {
+  const modeEl = document.getElementById("txMode");
+  const mode = modeEl ? modeEl.value : "Cash";
+  const toggleBtn = document.getElementById("toggleTxDenomBtn");
+  const panel = document.getElementById("txDenomPanel");
+  if (mode === "Cash") {
+    if (toggleBtn) toggleBtn.classList.remove("hidden");
+  } else {
+    if (toggleBtn) toggleBtn.classList.add("hidden");
+    if (panel) panel.classList.add("hidden");
+    clearTxDenominations();
+  }
+}
+
+function toggleTxDenomCounter() {
+  const panel = document.getElementById("txDenomPanel");
+  if (!panel) return;
+  const isHidden = panel.classList.contains("hidden");
+  if (isHidden) {
+    panel.classList.remove("hidden");
+    renderTxDenominationGrid();
+  } else {
+    panel.classList.add("hidden");
+  }
+}
+
+function renderTxDenominationGrid() {
+  const grid = document.getElementById("txDenomGrid");
+  if (!grid) return;
+  grid.innerHTML = "";
+
+  CURRENCY_DENOMINATIONS.forEach((d) => {
+    const count = parseInt(txDenominations[d] || 0, 10);
+    const subtotal = count * d;
+    const style = getDenominationBadgeStyle(d);
+
+    grid.innerHTML += `
+      <div class="bg-white p-2.5 rounded-xl border border-slate-200 shadow-2xs flex flex-col justify-between">
+        <div class="flex items-center justify-between mb-1.5">
+          <span class="text-xs font-bold px-1.5 py-0.5 rounded border ${style}">₹${d} Note</span>
+          <span id="txSubtotal_${d}" class="text-[11px] font-mono font-bold text-slate-700">${formatINR(subtotal)}</span>
+        </div>
+        <div class="flex items-center justify-between gap-1 mt-1">
+          <button type="button" onclick="stepTxDenom(${d}, -1)"
+            class="w-7 h-7 flex items-center justify-center rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm transition active:scale-95">
+            -
+          </button>
+          <input type="number" min="0" step="1" id="txDenomInput_${d}" value="${count}"
+            oninput="onTxDenomInputChange(${d}, this.value)"
+            class="w-12 text-center text-xs font-mono font-bold py-1 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none">
+          <button type="button" onclick="stepTxDenom(${d}, 1)"
+            class="w-7 h-7 flex items-center justify-center rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-sm transition active:scale-95">
+            +
+          </button>
+        </div>
+      </div>
+    `;
+  });
+}
+
+function stepTxDenom(denom, delta) {
+  const current = parseInt(txDenominations[denom] || 0, 10);
+  const next = Math.max(0, current + delta);
+  txDenominations[denom] = next;
+
+  const inputEl = document.getElementById(`txDenomInput_${denom}`);
+  if (inputEl) inputEl.value = next;
+
+  const subtotalEl = document.getElementById(`txSubtotal_${denom}`);
+  if (subtotalEl) subtotalEl.textContent = formatINR(next * denom);
+
+  updateTxDenominationsTotal();
+}
+
+function onTxDenomInputChange(denom, val) {
+  const parsed = parseInt(val, 10);
+  const next = isNaN(parsed) || parsed < 0 ? 0 : parsed;
+  txDenominations[denom] = next;
+
+  const subtotalEl = document.getElementById(`txSubtotal_${denom}`);
+  if (subtotalEl) subtotalEl.textContent = formatINR(next * denom);
+
+  updateTxDenominationsTotal();
+}
+
+function updateTxDenominationsTotal() {
+  const { totalAmount, totalNotes } = calcDenominationsTotal(txDenominations);
+  const badge = document.getElementById("txDenomSummaryBadge");
+  if (badge) {
+    badge.textContent = `${totalNotes} notes = ${formatINR(totalAmount)}`;
+  }
+
+  if (totalAmount > 0) {
+    const amtInput = document.getElementById("txAmount");
+    if (amtInput) amtInput.value = totalAmount;
+  }
+}
+
+function clearTxDenominations() {
+  CURRENCY_DENOMINATIONS.forEach((d) => {
+    txDenominations[d] = 0;
+  });
+  renderTxDenominationGrid();
+  updateTxDenominationsTotal();
+}
+
+// Dashboard Vault / Cash Drawer Note Counter
+function renderVaultDenominationGrid() {
+  const grid = document.getElementById("vaultDenomGrid");
+  if (!grid) return;
+  grid.innerHTML = "";
+
+  CURRENCY_DENOMINATIONS.forEach((d) => {
+    const count = parseInt(vaultDenominations[d] || 0, 10);
+    const subtotal = count * d;
+    const style = getDenominationBadgeStyle(d);
+
+    grid.innerHTML += `
+      <div class="bg-white p-2 rounded-xl border border-slate-200 shadow-2xs flex flex-col justify-between">
+        <div class="flex items-center justify-between mb-1">
+          <span class="text-[11px] font-bold px-1.5 py-0.5 rounded border ${style}">₹${d}</span>
+          <span id="vaultSubtotal_${d}" class="text-[10px] font-mono font-bold text-slate-700">${formatINR(subtotal)}</span>
+        </div>
+        <div class="flex items-center justify-between gap-1 mt-1">
+          <button type="button" onclick="stepVaultDenom(${d}, -1)"
+            class="w-6 h-6 flex items-center justify-center rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition active:scale-95">
+            -
+          </button>
+          <input type="number" min="0" step="1" id="vaultDenomInput_${d}" value="${count}"
+            oninput="onVaultDenomInputChange(${d}, this.value)"
+            class="w-10 text-center text-xs font-mono font-bold py-0.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none">
+          <button type="button" onclick="stepVaultDenom(${d}, 1)"
+            class="w-6 h-6 flex items-center justify-center rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-xs transition active:scale-95">
+            +
+          </button>
+        </div>
+      </div>
+    `;
+  });
+}
+
+function stepVaultDenom(denom, delta) {
+  const current = parseInt(vaultDenominations[denom] || 0, 10);
+  const next = Math.max(0, current + delta);
+  vaultDenominations[denom] = next;
+
+  const inputEl = document.getElementById(`vaultDenomInput_${denom}`);
+  if (inputEl) inputEl.value = next;
+
+  const subtotalEl = document.getElementById(`vaultSubtotal_${denom}`);
+  if (subtotalEl) subtotalEl.textContent = formatINR(next * denom);
+
+  updateVaultTallyDisplay();
+}
+
+function onVaultDenomInputChange(denom, val) {
+  const parsed = parseInt(val, 10);
+  const next = isNaN(parsed) || parsed < 0 ? 0 : parsed;
+  vaultDenominations[denom] = next;
+
+  const subtotalEl = document.getElementById(`vaultSubtotal_${denom}`);
+  if (subtotalEl) subtotalEl.textContent = formatINR(next * denom);
+
+  updateVaultTallyDisplay();
+}
+
+function updateVaultTallyDisplay() {
+  const { totalAmount, totalNotes } = calcDenominationsTotal(vaultDenominations);
+  const badge = document.getElementById("vaultTallyBadge");
+  if (badge) {
+    badge.textContent = `${totalNotes} notes = ${formatINR(totalAmount)}`;
+  }
+
+  const calcs = calculateDatasetBalances(daybookData);
+  const systemCash = calcs.cashBalance;
+
+  const systemCashEl = document.getElementById("vaultSystemCash");
+  if (systemCashEl) {
+    systemCashEl.textContent = formatINR(systemCash);
+  }
+
+  const statusEl = document.getElementById("vaultDiffStatus");
+  if (!statusEl) return;
+
+  if (totalNotes === 0 && totalAmount === 0) {
+    statusEl.textContent = "Enter drawer counts";
+    statusEl.className = "font-medium text-xs font-mono text-slate-500";
+    return;
+  }
+
+  const diff = totalAmount - systemCash;
+  if (Math.abs(diff) < 0.01) {
+    statusEl.innerHTML = `<span class="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">✓ Perfectly Matched (${formatINR(0)})</span>`;
+  } else if (diff > 0) {
+    statusEl.innerHTML = `<span class="text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">▲ Excess Cash: +${formatINR(diff)}</span>`;
+  } else {
+    statusEl.innerHTML = `<span class="text-rose-700 bg-rose-50 px-2 py-0.5 rounded border border-rose-200">▼ Shortage: -${formatINR(Math.abs(diff))}</span>`;
+  }
+}
+
+function resetVaultDenominations() {
+  CURRENCY_DENOMINATIONS.forEach((d) => {
+    vaultDenominations[d] = 0;
+  });
+  renderVaultDenominationGrid();
+  updateVaultTallyDisplay();
+}
+
+// Dashboard Note Flow Table
+function renderDashboardDenomFlowTable() {
+  const tbody = document.getElementById("dashDenomFlowTbody");
+  if (!tbody) return;
+  tbody.innerHTML = "";
+
+  let totalInNotes = 0;
+  let totalOutNotes = 0;
+  let totalNetNotes = 0;
+
+  CURRENCY_DENOMINATIONS.forEach((d) => {
+    const dep = (cashDenominationsFlow.deposited && cashDenominationsFlow.deposited[d]) || 0;
+    const wth = (cashDenominationsFlow.withdrawn && cashDenominationsFlow.withdrawn[d]) || 0;
+    const net = dep - wth;
+
+    totalInNotes += dep;
+    totalOutNotes += wth;
+    totalNetNotes += net;
+
+    const style = getDenominationBadgeStyle(d);
+    const netClass =
+      net > 0
+        ? "text-emerald-600 font-bold"
+        : net < 0
+        ? "text-rose-600 font-bold"
+        : "text-slate-400";
+    const netSign = net > 0 ? "+" : "";
+
+    tbody.innerHTML += `
+      <tr class="hover:bg-white/60 transition">
+        <td class="py-1.5">
+          <span class="text-[10px] font-bold px-1.5 py-0.5 rounded border ${style}">₹${d}</span>
+        </td>
+        <td class="py-1.5 text-center text-emerald-700">
+          ${dep > 0 ? `+${dep} <span class="text-[10px] text-slate-400">(${formatINR(dep * d)})</span>` : "-"}
+        </td>
+        <td class="py-1.5 text-center text-rose-700">
+          ${wth > 0 ? `-${wth} <span class="text-[10px] text-slate-400">(${formatINR(wth * d)})</span>` : "-"}
+        </td>
+        <td class="py-1.5 text-right ${netClass}">
+          ${net !== 0 ? `${netSign}${net} notes` : "0"}
+        </td>
+      </tr>
+    `;
+  });
+
+  const totalFlowEl = document.getElementById("dashTotalNotesFlow");
+  if (totalFlowEl) {
+    const sign = totalNetNotes > 0 ? "+" : "";
+    totalFlowEl.textContent = `${sign}${totalNetNotes} Notes (In: ${totalInNotes}, Out: ${totalOutNotes})`;
+    totalFlowEl.className =
+      totalNetNotes >= 0
+        ? "font-mono font-bold text-emerald-700 text-xs"
+        : "font-mono font-bold text-rose-700 text-xs";
+  }
+}
+
 // --- SHARED RENDERING HELPERS ---
 
 function buildTransactionRowHtml(item, includeActionBtn) {
@@ -492,7 +805,16 @@ function buildTransactionRowHtml(item, includeActionBtn) {
           item.category
         }</span>
       </td>
-      <td class="px-4 py-3 font-medium text-slate-900">${item.descText}</td>
+      <td class="px-4 py-3 font-medium text-slate-900">
+        <div>${item.descText}</div>
+        ${
+          item.denominations && hasActiveDenominations(item.denominations)
+            ? `<div class="mt-1 flex flex-wrap gap-1">${renderDenominationPillsHtml(
+                item.denominations
+              )}</div>`
+            : ""
+        }
+      </td>
       <td class="px-4 py-3">${modeBadge}</td>
       <td class="px-4 py-3 text-right font-medium text-emerald-600">${
         item.isDep ? "+" + formatINR(item.amount) : "-"
@@ -638,6 +960,10 @@ function renderDashboard() {
       </div>
     `;
   });
+
+  renderVaultDenominationGrid();
+  updateVaultTallyDisplay();
+  renderDashboardDenomFlowTable();
 }
 
 function selectQuickReportDate(offsetDays) {
@@ -844,6 +1170,9 @@ window.addEventListener("DOMContentLoaded", () => {
   initOtpInputs();
   const repInput = document.getElementById("repDateInput");
   if (repInput) repInput.value = selectedReportDateKey;
+  renderTxDenominationGrid();
+  renderVaultDenominationGrid();
+  updateVaultTallyDisplay();
   renderDaybookTable();
   renderDashboard();
 });

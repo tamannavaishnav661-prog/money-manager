@@ -49,6 +49,22 @@ let reportViewData = null;
 const mockMonthLedger = [];
 let selectedReportDateKey = getLocalDateKey();
 
+// Standard RBI Currency Denominations
+const CURRENCY_DENOMINATIONS = [500, 200, 100, 50, 20, 10];
+
+// Active transaction denomination counts
+let txDenominations = { 500: 0, 200: 0, 100: 0, 50: 0, 20: 0, 10: 0 };
+
+// Dashboard physical vault/drawer denomination counts
+let vaultDenominations = { 500: 0, 200: 0, 100: 0, 50: 0, 20: 0, 10: 0 };
+
+// Aggregated live daybook denomination flow
+let cashDenominationsFlow = {
+  deposited: { 500: 0, 200: 0, 100: 0, 50: 0, 20: 0, 10: 0 },
+  withdrawn: { 500: 0, 200: 0, 100: 0, 50: 0, 20: 0, 10: 0 },
+  net: { 500: 0, 200: 0, 100: 0, 50: 0, 20: 0, 10: 0 },
+};
+
 /**
  * Formats a numeric value as Indian Rupees (INR).
  */

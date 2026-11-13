@@ -25,16 +25,19 @@ def load_local_env():
     env_path = os.path.join(BASE_DIR, ".env")
     if not os.path.exists(env_path):
         return
-    with open(env_path, "r", encoding="utf-8") as f:
-        for raw_line in f:
-            line = raw_line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, val = line.split("=", 1)
-            key = key.strip()
-            val = val.strip().strip('"').strip("'")
-            if key and val:
-                os.environ.setdefault(key, val)
+    try:
+        with open(env_path, "r", encoding="utf-8") as f:
+            for raw_line in f:
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, val = line.split("=", 1)
+                key = key.strip()
+                val = val.strip().strip('"').strip("'")
+                if key and val:
+                    os.environ.setdefault(key, val)
+    except Exception:
+        pass
 
 
 load_local_env()
@@ -88,6 +91,7 @@ def init_db():
         type TEXT,
         mode TEXT,
         amount REAL,
+        denominations TEXT,
         is_deleted INTEGER DEFAULT 0,
         deleted_at TIMESTAMP,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -111,6 +115,7 @@ def init_db():
         ("transactions", "user_id", "INTEGER DEFAULT 1"),
         ("transactions", "is_deleted", "INTEGER DEFAULT 0"),
         ("transactions", "deleted_at", "TIMESTAMP"),
+        ("transactions", "denominations", "TEXT"),
         ("daily_balances", "user_id", "INTEGER DEFAULT 1"),
         ("users", "mobile", "TEXT"),
         ("users", "password_hash", "TEXT"),
@@ -558,14 +563,42 @@ def get_daybook():
     y_withdrawals = sum(float(t["amount"] or 0) for t in y_txs if t["type"] != "Deposit")
     y_has_data = bool(y_bal or y_txs)
 
+    tx_list = []
+    denom_flow = {
+        "deposited": {"500": 0, "200": 0, "100": 0, "50": 0, "20": 0, "10": 0},
+        "withdrawn": {"500": 0, "200": 0, "100": 0, "50": 0, "20": 0, "10": 0},
+        "net": {"500": 0, "200": 0, "100": 0, "50": 0, "20": 0, "10": 0},
+    }
+    for t in txs:
+        row = dict(t)
+        denoms = row.get("denominations")
+        if denoms:
+            if isinstance(denoms, str):
+                try:
+                    denoms = json.loads(denoms)
+                except Exception:
+                    pass
+            row["denominations"] = denoms
+            if isinstance(denoms, dict) and row.get("mode") == "Cash":
+                bucket = "deposited" if row.get("type") == "Deposit" else "withdrawn"
+                for k, v in denoms.items():
+                    str_k = str(k)
+                    if str_k in denom_flow[bucket]:
+                        denom_flow[bucket][str_k] += int(v or 0)
+        tx_list.append(row)
+
+    for k in denom_flow["net"]:
+        denom_flow["net"][k] = denom_flow["deposited"][k] - denom_flow["withdrawn"][k]
+
     return jsonify({
         "success": True,
         "date": req_date,
         "user_id": user_id,
         "opening_cash": day_bal["opening_cash"] if day_bal else 0.0,
         "opening_online": day_bal["opening_online"] if day_bal else 0.0,
-        "transactions": [dict(t) for t in txs],
+        "transactions": tx_list,
         "deleted_count": deleted_count,
+        "cash_denominations_flow": denom_flow,
         "yesterday_summary": {
             "has_data": y_has_data,
             "date": yesterday_str,
@@ -588,15 +621,19 @@ def add_tx():
     tx_type = data.get("type") or data.get("effect") or "Deposit"
     mode = data.get("mode", "Cash")
     amount = float(data.get("amount", 0))
+    denoms = data.get("denominations")
+    denoms_str = None
+    if denoms:
+        denoms_str = json.dumps(denoms) if isinstance(denoms, (dict, list)) else str(denoms)
 
     if not desc or amount <= 0:
         return jsonify({"success": False, "message": "Invalid data"}), 400
 
     conn = get_db()
     c = conn.execute("""
-    INSERT INTO transactions (user_id, date, time, description, type, mode, amount, is_deleted)
-    VALUES (?, ?, ?, ?, ?, ?, ?, 0)
-    """, (user_id, tx_date, time_str, desc, tx_type, mode, amount))
+    INSERT INTO transactions (user_id, date, time, description, type, mode, amount, denominations, is_deleted)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
+    """, (user_id, tx_date, time_str, desc, tx_type, mode, amount, denoms_str))
     conn.commit()
     conn.close()
     return jsonify({"success": True, "id": c.lastrowid, "message": "Saved securely to user's private ledger!"})

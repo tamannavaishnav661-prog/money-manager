@@ -18,6 +18,7 @@ function exportExcel(type) {
     Category: r.category,
     Description: r.descText,
     Mode: r.mode,
+    Denominations: formatDenominationsSummary(r.denominations) || "-",
     "Deposit (INR)": r.isDep ? r.amount : 0,
     "Withdrawal (INR)": !r.isDep ? r.amount : 0,
     "Running Total (INR)": r.runningTotal,
@@ -53,7 +54,10 @@ function exportPDF() {
     r.displayIndex,
     r.time,
     r.category,
-    r.descText,
+    r.descText +
+      (hasActiveDenominations(r.denominations)
+        ? `\n[${formatDenominationsSummary(r.denominations)}]`
+        : ""),
     r.mode,
     r.isDep ? "+" + formatINR(r.amount) : "-",
     !r.isDep ? "-" + formatINR(r.amount) : "-",
