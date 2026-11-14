@@ -532,12 +532,12 @@
                                 <i class="fa-solid fa-calculator"></i> Notes Counter
                             </button>
                         </div>
-                        <input type="number" step="0.01" id="txAmount" placeholder="0.00" required
+                        <input type="number" step="0.01" id="txAmount" placeholder="0.00" required oninput="onTxAmountInput()"
                             class="w-full text-xs font-mono font-bold border border-slate-200 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500">
                     </div>
 
                     <!-- Collapsible Currency Denomination Counter Drawer -->
-                    <div id="txDenomPanel" class="hidden lg:col-span-5 bg-gradient-to-br from-slate-50 to-blue-50/40 border border-blue-200/80 rounded-2xl p-4 shadow-sm space-y-3">
+                    <div id="txDenomPanel" class="lg:col-span-5 bg-gradient-to-br from-slate-50 to-blue-50/40 border border-blue-200/80 rounded-2xl p-4 shadow-sm space-y-3">
                         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b border-slate-200">
                             <div class="flex items-center gap-2">
                                 <span class="bg-blue-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">Cash Counter</span>

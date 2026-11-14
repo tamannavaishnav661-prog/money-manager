@@ -358,10 +358,14 @@ async function addTransaction(e) {
     minute: "2-digit",
   });
 
-  const denoms =
-    mode === "Cash" && hasActiveDenominations(txDenominations)
-      ? { ...txDenominations }
-      : null;
+  let denoms = null;
+  if (mode === "Cash") {
+    if (hasActiveDenominations(txDenominations)) {
+      denoms = { ...txDenominations };
+    } else if (amt > 0) {
+      denoms = autoBreakdownAmountToDenominations(amt);
+    }
+  }
 
   const newTx = {
     id: Date.now(),
@@ -384,6 +388,7 @@ async function addTransaction(e) {
   }
 
   daybookData.transactions.push(newTx);
+  cashDenominationsFlow = computeCashDenominationsFlow(daybookData.transactions);
   document.getElementById("txDesc").value = "";
   document.getElementById("txAmount").value = "";
   clearTxDenominations();
@@ -410,6 +415,7 @@ async function deleteTransaction(id) {
   daybookData.transactions = daybookData.transactions.filter(
     (t) => t.id !== id
   );
+  cashDenominationsFlow = computeCashDenominationsFlow(daybookData.transactions);
   updateRecoveryBadge(deletedArchiveVault.length);
   renderDaybookTable();
   renderDashboard();
@@ -527,10 +533,36 @@ function onTxModeChange() {
   const panel = document.getElementById("txDenomPanel");
   if (mode === "Cash") {
     if (toggleBtn) toggleBtn.classList.remove("hidden");
+    if (panel) {
+      panel.classList.remove("hidden");
+      renderTxDenominationGrid();
+    }
   } else {
     if (toggleBtn) toggleBtn.classList.add("hidden");
     if (panel) panel.classList.add("hidden");
     clearTxDenominations();
+  }
+}
+
+function onTxAmountInput() {
+  const modeEl = document.getElementById("txMode");
+  const mode = modeEl ? modeEl.value : "Cash";
+  if (mode !== "Cash") return;
+
+  const amtInput = document.getElementById("txAmount");
+  const amt = parseFloat(amtInput ? amtInput.value : 0) || 0;
+
+  if (amt > 0 && !hasActiveDenominations(txDenominations)) {
+    const autoMap = autoBreakdownAmountToDenominations(amt);
+    CURRENCY_DENOMINATIONS.forEach((d) => {
+      txDenominations[d] = autoMap[d] || 0;
+    });
+    renderTxDenominationGrid();
+    const badge = document.getElementById("txDenomSummaryBadge");
+    if (badge) {
+      const { totalAmount, totalNotes } = calcDenominationsTotal(txDenominations);
+      badge.textContent = `${totalNotes} notes = ${formatINR(totalAmount)}`;
+    }
   }
 }
 
@@ -730,6 +762,7 @@ function resetVaultDenominations() {
 
 // Dashboard Note Flow Table
 function renderDashboardDenomFlowTable() {
+  cashDenominationsFlow = computeCashDenominationsFlow(daybookData.transactions);
   const tbody = document.getElementById("dashDenomFlowTbody");
   if (!tbody) return;
   tbody.innerHTML = "";
@@ -823,9 +856,11 @@ function buildTransactionRowHtml(item, includeActionBtn) {
       <td class="px-4 py-3 font-medium text-slate-900">
         <div>${item.descText}</div>
         ${
-          item.denominations && hasActiveDenominations(item.denominations)
+          item.mode === "Cash" && (hasActiveDenominations(item.denominations) || Number(item.amount) > 0)
             ? `<div class="mt-1 flex flex-wrap gap-1">${renderDenominationPillsHtml(
-                item.denominations
+                hasActiveDenominations(item.denominations)
+                  ? item.denominations
+                  : autoBreakdownAmountToDenominations(item.amount)
               )}</div>`
             : ""
         }

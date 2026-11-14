@@ -102,3 +102,66 @@ function formatDenominationsSummary(denomMap) {
   });
   return parts.join(", ");
 }
+
+/**
+ * Automatically breaks down a numeric amount into standard Indian currency notes.
+ */
+function autoBreakdownAmountToDenominations(amt) {
+  const map = { 500: 0, 200: 0, 100: 0, 50: 0, 20: 0, 10: 0 };
+  let rem = Math.floor(Number(amt) || 0);
+  CURRENCY_DENOMINATIONS.forEach((d) => {
+    if (rem >= d) {
+      const count = Math.floor(rem / d);
+      map[d] = count;
+      rem -= count * d;
+    }
+  });
+  return map;
+}
+
+/**
+ * Computes live note inflow, outflow, and net flow from a list of transactions.
+ */
+function computeCashDenominationsFlow(txList) {
+  const flow = {
+    deposited: { 500: 0, 200: 0, 100: 0, 50: 0, 20: 0, 10: 0 },
+    withdrawn: { 500: 0, 200: 0, 100: 0, 50: 0, 20: 0, 10: 0 },
+    net: { 500: 0, 200: 0, 100: 0, 50: 0, 20: 0, 10: 0 },
+  };
+
+  (txList || []).forEach((t) => {
+    if (t.mode !== "Cash") return;
+
+    let denoms = t.denominations;
+    if (typeof denoms === "string") {
+      try {
+        denoms = JSON.parse(denoms);
+      } catch (e) {
+        denoms = null;
+      }
+    }
+
+    let noteMap = {};
+    if (denoms && typeof denoms === "object" && hasActiveDenominations(denoms)) {
+      noteMap = denoms;
+    } else if (Number(t.amount) > 0) {
+      noteMap = autoBreakdownAmountToDenominations(t.amount);
+    }
+
+    const isDep = t.effect === "Deposit" || t.type === "Deposit" || t.isDep;
+    const bucket = isDep ? "deposited" : "withdrawn";
+
+    CURRENCY_DENOMINATIONS.forEach((d) => {
+      const count = parseInt(noteMap[d] || noteMap[String(d)] || 0, 10);
+      if (count > 0) {
+        flow[bucket][d] += count;
+      }
+    });
+  });
+
+  CURRENCY_DENOMINATIONS.forEach((d) => {
+    flow.net[d] = flow.deposited[d] - flow.withdrawn[d];
+  });
+
+  return flow;
+}

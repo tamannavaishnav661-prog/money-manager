@@ -769,12 +769,26 @@ def get_daybook():
                 except Exception:
                     pass
             row["denominations"] = denoms
-            if isinstance(denoms, dict) and row.get("mode") == "Cash":
-                bucket = "deposited" if row.get("type") == "Deposit" else "withdrawn"
-                for k, v in denoms.items():
-                    str_k = str(k)
-                    if str_k in denom_flow[bucket]:
-                        denom_flow[bucket][str_k] += int(v or 0)
+
+        # Process Cash transactions: use explicit denominations or auto-breakdown from amount
+        if row.get("mode") == "Cash":
+            if not denoms or not isinstance(denoms, dict) or not any(int(v or 0) > 0 for v in denoms.values()):
+                amt_int = int(float(row.get("amount") or 0))
+                auto_map = {}
+                for d in [500, 200, 100, 50, 20, 10]:
+                    if amt_int >= d:
+                        count = amt_int // d
+                        auto_map[str(d)] = count
+                        amt_int %= d
+                denoms = auto_map
+                row["denominations"] = denoms
+
+            bucket = "deposited" if row.get("type") == "Deposit" else "withdrawn"
+            for k, v in denoms.items():
+                str_k = str(k)
+                if str_k in denom_flow[bucket]:
+                    denom_flow[bucket][str_k] += int(v or 0)
+
         tx_list.append(row)
 
     for k in denom_flow["net"]:
@@ -815,6 +829,16 @@ def add_tx():
     denoms_str = None
     if denoms:
         denoms_str = json.dumps(denoms) if isinstance(denoms, (dict, list)) else str(denoms)
+    elif mode == "Cash" and amount > 0:
+        amt_int = int(amount)
+        auto_map = {}
+        for d in [500, 200, 100, 50, 20, 10]:
+            if amt_int >= d:
+                count = amt_int // d
+                auto_map[str(d)] = count
+                amt_int %= d
+        if auto_map:
+            denoms_str = json.dumps(auto_map)
 
     if not desc or amount <= 0:
         return jsonify({"success": False, "message": "Invalid data"}), 400
