@@ -2,6 +2,34 @@
 // MoneyManager Pro - Backend API & Data Storage Layer
 // ============================================================================
 
+const SESSION_STORAGE_KEY = "moneymanager_pro_session";
+
+function saveUserSession(user) {
+  if (!user) return;
+  try {
+    localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(user));
+  } catch (e) {
+    console.warn("Could not save user session", e);
+  }
+}
+
+function getUserSession() {
+  try {
+    const raw = localStorage.getItem(SESSION_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function clearUserSession() {
+  try {
+    localStorage.removeItem(SESSION_STORAGE_KEY);
+  } catch (e) {
+    console.warn("Could not clear user session", e);
+  }
+}
+
 /**
  * Helper for JSON fetch requests to the Flask backend.
  */
@@ -11,6 +39,13 @@ async function apiRequest(path, options = {}) {
     ...options,
   });
   return res.json();
+}
+
+async function apiVerifySession(user) {
+  return apiRequest("/api/auth/verify-session", {
+    method: "POST",
+    body: JSON.stringify(user),
+  });
 }
 
 async function apiRegister(email, mobile, password) {

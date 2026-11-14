@@ -10,6 +10,7 @@ function setAuthMode(mode) {
   const tabUp = document.getElementById("tabSignUp");
   const submitBtn = document.getElementById("authSubmitBtn");
   const helper = document.getElementById("authHelperText");
+  const mobileWrap = document.getElementById("loginMobileWrapper");
 
   const activeClass =
     "w-1/2 py-2 text-xs font-bold rounded-lg transition bg-white text-blue-600 shadow-sm";
@@ -19,12 +20,14 @@ function setAuthMode(mode) {
   if (mode === "signin") {
     tabIn.className = activeClass;
     tabUp.className = inactiveClass;
+    if (mobileWrap) mobileWrap.classList.add("hidden");
     submitBtn.innerHTML = "<span>Send OTP</span>";
     helper.textContent = "🔒 Bank-Grade 256-Bit Encrypted Security";
   } else {
     tabUp.className = activeClass;
     tabIn.className = inactiveClass;
-    submitBtn.innerHTML = "<span>Send OTP</span>";
+    if (mobileWrap) mobileWrap.classList.remove("hidden");
+    submitBtn.innerHTML = "<span>Create Account & Send OTP</span>";
     helper.textContent =
       "Sign up with your personal email & mobile to create your private ledger";
   }
@@ -32,11 +35,17 @@ function setAuthMode(mode) {
 
 async function handleStep1() {
   const user = document.getElementById("loginUser").value.trim();
-  const mobile = document.getElementById("loginMobile").value.trim();
+  const mobileInput = document.getElementById("loginMobile");
+  const mobile = mobileInput ? mobileInput.value.trim() : "";
   const pass = document.getElementById("loginPass").value.trim();
 
-  if (!user || !mobile || !pass) {
-    alert("Please enter Email, Mobile Number and Password");
+  if (!user || !pass) {
+    alert("Please enter Email Address and Password");
+    return;
+  }
+
+  if (authMode === "signup" && !mobile) {
+    alert("Please enter your Mobile Number for new account registration.");
     return;
   }
 
@@ -47,7 +56,11 @@ async function handleStep1() {
         : await apiLoginStep1(user, mobile, pass);
 
     if (data.success === true) {
-      currentUser = { email: user, mobile: mobile, id: 1 };
+      currentUser = {
+        email: user,
+        mobile: data.mobile || mobile,
+        id: data.user_id || 1,
+      };
       showStep2();
     } else {
       alert(data.message || "Authentication error");
@@ -140,6 +153,7 @@ async function handleStep2() {
     const data = await apiLoginStep2(userEmail, otp);
     if (data.success === true) {
       currentUser = data.user || { id: 1, email: userEmail };
+      saveUserSession(currentUser);
       enterApp();
       return;
     } else {
@@ -163,6 +177,7 @@ function enterApp() {
 }
 
 function logout() {
+  clearUserSession();
   currentUser = null;
   document.getElementById("mainHeader").classList.add("hidden");
   document.getElementById("dashboardSection").classList.add("hidden");
@@ -1166,13 +1181,34 @@ function viewDateFromLedger(dateKey) {
 
 // --- INITIALIZATION ---
 
-window.addEventListener("DOMContentLoaded", () => {
+window.addEventListener("DOMContentLoaded", async () => {
   initOtpInputs();
   const repInput = document.getElementById("repDateInput");
   if (repInput) repInput.value = selectedReportDateKey;
   renderTxDenominationGrid();
   renderVaultDenominationGrid();
   updateVaultTallyDisplay();
-  renderDaybookTable();
-  renderDashboard();
+
+  // Persistent Auto-Login Check via localStorage
+  const savedSession = getUserSession();
+  if (savedSession && savedSession.email && savedSession.id) {
+    currentUser = savedSession;
+    enterApp();
+
+    // Verify session in background with backend
+    try {
+      const verifyRes = await apiVerifySession(savedSession);
+      if (verifyRes && verifyRes.success && verifyRes.user) {
+        currentUser = verifyRes.user;
+        saveUserSession(currentUser);
+        const headerEmail = document.getElementById("headerUserEmail");
+        if (headerEmail) headerEmail.textContent = currentUser.email;
+      }
+    } catch (e) {
+      // Offline fallback: keep local session active
+    }
+  } else {
+    renderDaybookTable();
+    renderDashboard();
+  }
 });

@@ -46,86 +46,244 @@ app = Flask(__name__, static_folder=BASE_DIR, static_url_path="")
 CORS(app)
 
 DB_FILE = os.path.join(BASE_DIR, "moneymanager.db")
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
+IS_POSTGRES = bool(DATABASE_URL)
+
+
+class UnifiedRow(dict):
+    """Row wrapper allowing column access by name (row['email']) and numeric index (row[0])."""
+    def __init__(self, d, tuple_vals=None):
+        super().__init__(d)
+        self._values = tuple_vals if tuple_vals is not None else list(d.values())
+
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return self._values[key]
+        return super().__getitem__(key)
+
+
+class UnifiedCursor:
+    def __init__(self, raw_cursor, is_postgres=False):
+        self.cursor = raw_cursor
+        self.is_postgres = is_postgres
+        self.lastrowid = None
+
+    def execute(self, sql, params=None):
+        if params is None:
+            params = ()
+        if self.is_postgres:
+            clean_sql = sql.replace("?", "%s")
+            is_insert = clean_sql.strip().upper().startswith("INSERT INTO")
+            if is_insert and "RETURNING" not in clean_sql.upper():
+                clean_sql = clean_sql.rstrip().rstrip(";") + " RETURNING id"
+                self.cursor.execute(clean_sql, params)
+                res = self.cursor.fetchone()
+                if res:
+                    self.lastrowid = res.get("id") if isinstance(res, dict) else res[0]
+            else:
+                self.cursor.execute(clean_sql, params)
+        else:
+            self.cursor.execute(sql, params)
+            self.lastrowid = getattr(self.cursor, "lastrowid", None)
+        return self
+
+    def fetchone(self):
+        row = self.cursor.fetchone()
+        if row is None:
+            return None
+        if self.is_postgres:
+            return UnifiedRow(row)
+        return row
+
+    def fetchall(self):
+        rows = self.cursor.fetchall()
+        if not rows:
+            return []
+        if self.is_postgres:
+            return [UnifiedRow(r) for r in rows]
+        return rows
+
+    def close(self):
+        self.cursor.close()
+
+
+class UnifiedConnection:
+    def __init__(self, raw_conn, is_postgres=False):
+        self.conn = raw_conn
+        self.is_postgres = is_postgres
+
+    def cursor(self):
+        return UnifiedCursor(self.conn.cursor(), self.is_postgres)
+
+    def execute(self, sql, params=None):
+        cur = self.cursor()
+        cur.execute(sql, params)
+        return cur
+
+    def commit(self):
+        self.conn.commit()
+
+    def rollback(self):
+        self.conn.rollback()
+
+    def close(self):
+        self.conn.close()
+
+
+def get_db():
+    if IS_POSTGRES:
+        import psycopg2
+        from psycopg2.extras import RealDictCursor
+        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        return UnifiedConnection(conn, is_postgres=True)
+    else:
+        conn = sqlite3.connect(DB_FILE)
+        conn.row_factory = sqlite3.Row
+        return UnifiedConnection(conn, is_postgres=False)
 
 
 # --- DATABASE SETUP WITH MULTI-USER ISOLATION & HASHING ---
 def init_db():
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db()
     cursor = conn.cursor()
 
-    # 1. Users Table (with Hashed Passwords & OTP Expiry)
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        email TEXT UNIQUE,
-        mobile TEXT,
-        password_hash TEXT,
-        otp_secret TEXT,
-        otp_expires_at TIMESTAMP,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-    """)
+    if IS_POSTGRES:
+        # PostgreSQL Schema (Persistent Cloud Storage)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id SERIAL PRIMARY KEY,
+            email TEXT UNIQUE,
+            mobile TEXT,
+            password_hash TEXT,
+            otp_secret TEXT,
+            otp_expires_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        """)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS daily_balances (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER DEFAULT 1,
+            date TEXT,
+            opening_cash REAL DEFAULT 0.0,
+            opening_online REAL DEFAULT 0.0,
+            closing_cash REAL DEFAULT 0.0,
+            closing_online REAL DEFAULT 0.0,
+            is_closed INTEGER DEFAULT 0
+        );
+        """)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS transactions (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER DEFAULT 1,
+            date TEXT,
+            time TEXT,
+            description TEXT,
+            type TEXT,
+            mode TEXT,
+            amount REAL,
+            denominations TEXT,
+            is_deleted INTEGER DEFAULT 0,
+            deleted_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        """)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS recovery_vault (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER DEFAULT 1,
+            email TEXT,
+            action TEXT,
+            snapshot_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        """)
 
-    # 2. Daily Summary Table (User Isolated)
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS daily_balances (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER DEFAULT 1,
-        date TEXT,
-        opening_cash REAL DEFAULT 0.0,
-        opening_online REAL DEFAULT 0.0,
-        closing_cash REAL DEFAULT 0.0,
-        closing_online REAL DEFAULT 0.0,
-        is_closed INTEGER DEFAULT 0
-    )
-    """)
+        pg_cols = [
+            ("transactions", "user_id", "INTEGER DEFAULT 1"),
+            ("transactions", "is_deleted", "INTEGER DEFAULT 0"),
+            ("transactions", "deleted_at", "TIMESTAMP"),
+            ("transactions", "denominations", "TEXT"),
+            ("daily_balances", "user_id", "INTEGER DEFAULT 1"),
+            ("users", "mobile", "TEXT"),
+            ("users", "password_hash", "TEXT"),
+            ("users", "otp_expires_at", "TIMESTAMP"),
+        ]
+        for table, col, col_type in pg_cols:
+            try:
+                cursor.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} {col_type}")
+            except Exception:
+                pass
+    else:
+        # SQLite Schema (Local Development)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email TEXT UNIQUE,
+            mobile TEXT,
+            password_hash TEXT,
+            otp_secret TEXT,
+            otp_expires_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS daily_balances (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER DEFAULT 1,
+            date TEXT,
+            opening_cash REAL DEFAULT 0.0,
+            opening_online REAL DEFAULT 0.0,
+            closing_cash REAL DEFAULT 0.0,
+            closing_online REAL DEFAULT 0.0,
+            is_closed INTEGER DEFAULT 0
+        )
+        """)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS transactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER DEFAULT 1,
+            date TEXT,
+            time TEXT,
+            description TEXT,
+            type TEXT,
+            mode TEXT,
+            amount REAL,
+            denominations TEXT,
+            is_deleted INTEGER DEFAULT 0,
+            deleted_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS recovery_vault (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER DEFAULT 1,
+            email TEXT,
+            action TEXT,
+            snapshot_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
 
-    # 3. Transactions Table (User Isolated & Soft-Delete)
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS transactions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER DEFAULT 1,
-        date TEXT,
-        time TEXT,
-        description TEXT,
-        type TEXT,
-        mode TEXT,
-        amount REAL,
-        denominations TEXT,
-        is_deleted INTEGER DEFAULT 0,
-        deleted_at TIMESTAMP,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-    """)
-
-    # 4. Recovery Vault Table
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS recovery_vault (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER DEFAULT 1,
-        email TEXT,
-        action TEXT,
-        snapshot_json TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-    """)
-
-    # --- AUTO-MIGRATION (Safely adds missing columns without losing data) ---
-    columns_to_add = [
-        ("transactions", "user_id", "INTEGER DEFAULT 1"),
-        ("transactions", "is_deleted", "INTEGER DEFAULT 0"),
-        ("transactions", "deleted_at", "TIMESTAMP"),
-        ("transactions", "denominations", "TEXT"),
-        ("daily_balances", "user_id", "INTEGER DEFAULT 1"),
-        ("users", "mobile", "TEXT"),
-        ("users", "password_hash", "TEXT"),
-        ("users", "otp_expires_at", "TIMESTAMP")
-    ]
-    for table, col, col_type in columns_to_add:
-        try:
-            cursor.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}")
-        except sqlite3.OperationalError:
-            pass
+        columns_to_add = [
+            ("transactions", "user_id", "INTEGER DEFAULT 1"),
+            ("transactions", "is_deleted", "INTEGER DEFAULT 0"),
+            ("transactions", "deleted_at", "TIMESTAMP"),
+            ("transactions", "denominations", "TEXT"),
+            ("daily_balances", "user_id", "INTEGER DEFAULT 1"),
+            ("users", "mobile", "TEXT"),
+            ("users", "password_hash", "TEXT"),
+            ("users", "otp_expires_at", "TIMESTAMP")
+        ]
+        for table, col, col_type in columns_to_add:
+            try:
+                cursor.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}")
+            except Exception:
+                pass
 
     # Default Secure Admin User Setup
     cursor.execute("SELECT * FROM users WHERE email = ?", ("user@example.com",))
@@ -149,12 +307,6 @@ def init_db():
 
 # Auto-initialize database on startup for Gunicorn / Render
 init_db()
-
-
-def get_db():
-    conn = sqlite3.connect(DB_FILE)
-    conn.row_factory = sqlite3.Row
-    return conn
 
 
 def generate_dynamic_otp():
@@ -408,18 +560,28 @@ def register():
     VALUES (?, ?, 0.0, 0.0, 0.0, 0.0, 0)
     """, (new_user_id, today_str))
 
-    sent_ok, channels = dispatch_otp_notifications(email, formatted_mobile, new_otp)
-    if not sent_ok:
-        conn.rollback()
-        conn.close()
-        return jsonify({"success": False, "message": f"Could not send OTP: {channels}"}), 502
-
+    # Commit immediately so the account is NEVER lost
     conn.commit()
+
+    sent_ok, channels = dispatch_otp_notifications(email, formatted_mobile, new_otp)
     conn.close()
+
+    if not sent_ok:
+        return jsonify({
+            "success": True,
+            "otp_dispatched": False,
+            "message": f"Account created! Note: Could not dispatch OTP automatically ({channels}). Please Sign In.",
+            "user_id": new_user_id,
+            "email": email,
+            "mobile": formatted_mobile,
+            "channels": channels,
+        })
 
     return jsonify({
         "success": True,
+        "otp_dispatched": True,
         "message": "Account created! OTP dispatched.",
+        "user_id": new_user_id,
         "email": email,
         "mobile": formatted_mobile,
         "channels": channels,
@@ -434,12 +596,15 @@ def login_step1():
     mobile = data.get("mobile", "").strip()
     password = data.get("password", "").strip()
 
+    if not email:
+        return jsonify({"success": False, "message": "Email address is required"}), 400
+
     conn = get_db()
     user = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
 
     if not user:
         conn.close()
-        return jsonify({"success": False, "message": "Account not found. Please Sign Up first!"}), 404
+        return jsonify({"success": False, "message": "Account not found with this email. Please click 'Create Account' to sign up!"}), 404
 
     # Verify Password Hash
     valid_password = False
@@ -453,15 +618,13 @@ def login_step1():
         conn.close()
         return jsonify({"success": False, "message": "Invalid password. Access denied."}), 401
 
-    raw_mobile = mobile or user["mobile"] or ""
+    # On Sign In, mobile is optional: use stored mobile if not provided
+    raw_mobile = mobile or user["mobile"] or "+91 99999 99999"
     parsed_mobile = normalize_mobile(raw_mobile)
-    if not parsed_mobile:
-        conn.close()
-        return jsonify({"success": False, "message": "Please enter a valid 10-digit mobile number"}), 400
+    user_mobile = parsed_mobile[1] if parsed_mobile else (user["mobile"] or "+91 99999 99999")
 
     new_otp = generate_dynamic_otp()
     expires_at = (datetime.now() + timedelta(minutes=5)).isoformat()
-    user_mobile = parsed_mobile[1]
 
     conn.execute(
         "UPDATE users SET otp_secret = ?, otp_expires_at = ?, mobile = ? WHERE id = ?",
@@ -525,6 +688,33 @@ def login_step2():
             "email": user["email"],
             "mobile": user["mobile"],
         },
+    })
+
+
+# Persistent Session Verification (Auto-Login check)
+@app.route("/api/auth/verify-session", methods=["POST"])
+def verify_session():
+    data = request.json or {}
+    user_id = data.get("id")
+    email = (data.get("email") or "").strip().lower()
+
+    if not user_id or not email:
+        return jsonify({"success": False, "message": "Invalid session parameters"}), 400
+
+    conn = get_db()
+    user = conn.execute("SELECT id, email, mobile FROM users WHERE id = ? AND email = ?", (user_id, email)).fetchone()
+    conn.close()
+
+    if not user:
+        return jsonify({"success": False, "message": "Session expired or user not found"}), 404
+
+    return jsonify({
+        "success": True,
+        "user": {
+            "id": user["id"],
+            "email": user["email"],
+            "mobile": user["mobile"],
+        }
     })
 
 
